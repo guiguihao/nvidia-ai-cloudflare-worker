@@ -12,16 +12,30 @@
 - ✅ CORS 支持
 - ✅ 全局边缘网络加速
 
-## 手动部署
-1. Cloudflare 创建 Worker ->start with helloworld
-2. 编辑  直接复制worker.js全部代码 替换helloworld内容
-3. settings -> Variables and Secrets -> add ->Type选择secret -> Variable name填NVIDIA_API_KEY->value填你的nvidia api key
-3. 绑定kv 先创建kv 点击你刚才创建的worker 选择bindings -> add >kv namespase -> Variable name设置NVIDIA_KV ->选择kv
-4. settings -> Trigger Events >Cron Triggers  //自己根据情况设置自动探测时间 5分钟 10分钟 随便都可以
-5. settings -> Custom domain //绑定自定义域名
+## 一 手动部署
+  - 1. Cloudflare 创建 Worker ->start with helloworld
+  - 2. 编辑  直接复制worker.js全部代码 替换helloworld内容
+  - 3. settings -> Variables and Secrets -> add ->Type选择secret -> Variable name填NVIDIA_API_KEY->value填你的nvidia api key
+  - 4. 绑定kv 先创建kv 点击你刚才创建的worker 选择bindings -> add >kv namespase -> Variable name设置NVIDIA_KV ->选择kv
+  - 5. settings -> Trigger Events >Cron Triggers  //自己根据情况设置自动探测时间 5分钟 10分钟 随便都可以
+  - 6. settings -> Custom domain //绑定自定义域名
+
+##### 1.1 查看模型优选状态
+   - 你的域名/v1/status
+
+##### 1.2 使用cherry 测试
+  - 1. 设置 > 添加 -> 供应商名称 随意填 -> 类型 openai
+  - 2. api 秘钥 随便填 没做验证
+  - 3. api 地址 就是你的域名
+  - 4. 添加模型 模型id: auto  coder novel task, 如果你需要固定模型例子:openai/gpt-oss-120b 
+
+##### 1.3 查看日志
+
+  - Worker -> observanility
 
 
-## 快速开始
+
+## 二 快速部署
 
 ### 1. 配置 API Key
 
@@ -106,30 +120,6 @@ curl https://your-worker.your-subdomain.workers.dev/v1/chat/completions \
 - **novel**: 小说创作相关模型 (minimax, novel, qwen, llama)
 - **task**: 任务处理相关模型 (gpt-oss, deepseek, task, qwen, 405b, 70b)
 
-## 优先级列表
-
-模型选择优先级（由高到低）：
-
-  // Tier 1: 最强通用模型（最高优先级）
-  "qwen/qwen3-coder-480b-a35b-instruct",   // 0 - 代码能力最强
-  "deepseek-ai/deepseek-v3.2",              // 1 - 推理/编程强
-  "qwen/qwen3.5-397b-a17b",                // 2 - 中文优化，参数量大
-  "openai/gpt-oss-120b",                   // 3 - OpenAI 开源大模型
-  "meta/llama-3.1-405b-instruct",          // 4 - 参数量最大，通用性强
-  // Tier 2: 高质量备选
-  "mistralai/mistral-large-3-675b-instruct-2512", // 5 - 最新大模型
-  "deepseek-ai/deepseek-v3.1",              // 6
-  "minimaxai/minimax-m2.7",                // 7 - 长文本擅长
-  "minimaxai/minimax-m2.5",                // 8
-  "nvidia/nemotron-4-340b-instruct",       // 9 - NVIDIA 自家优化
-  "qwen/qwen3.5-122b-a10b",               // 10
-  // Tier 3: 中等模型（延迟更低）
-  "meta/llama-3.3-70b-instruct",           // 11
-  "meta/llama-3.1-70b-instruct",           // 12
-  "mistralai/mistral-large-2-instruct",    // 13
-  "mistralai/mixtral-8x22b-instruct-v0.1", // 14
-  "nvidia/llama-3.3-nemotron-super-49b-v1.5", // 15
-  "deepseek-ai/deepseek-r1-distill-qwen-32b", // 16
 
 ## 高级配置
 
