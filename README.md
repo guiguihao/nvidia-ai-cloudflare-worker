@@ -1,5 +1,5 @@
 # NVIDIA API Proxy - Cloudflare Workers
-完全免费的 NVIDIA API 代理服务，基于 Cloudflare Workers 实现。
+完全免费白漂 NVIDIA API 服务，基于 Cloudflare Workers 实现。
 
 这是一个运行在 Cloudflare Workers 上的 NVIDIA API 代理服务，支持自动测速、模型分组、降级和故障转移。
 
