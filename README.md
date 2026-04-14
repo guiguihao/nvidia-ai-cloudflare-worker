@@ -12,7 +12,8 @@
 - ✅ CORS 支持
 - ✅ 全局边缘网络加速
 
-## 一 手动部署
+## 一、手动部署
+### 1.1 、部署
   - 1. Cloudflare 创建 Worker ->start with helloworld
   - 2. 编辑  直接复制worker.js全部代码 替换helloworld内容
   - 3. settings -> Variables and Secrets -> add ->Type选择secret -> Variable name填NVIDIA_API_KEY->value填你的nvidia api key
@@ -20,22 +21,22 @@
   - 5. settings -> Trigger Events >Cron Triggers  //自己根据情况设置自动探测时间 5分钟 10分钟 随便都可以
   - 6. settings -> Custom domain //绑定自定义域名
 
-##### 1.1 查看模型优选状态
+### 1.3、 查看模型优选状态
    - 你的域名/v1/status
 
-##### 1.2 使用cherry 测试
+### 1.3、 使用cherry 测试
   - 1. 设置 > 添加 -> 供应商名称 随意填 -> 类型 openai
   - 2. api 秘钥 随便填 没做验证
   - 3. api 地址 就是你的域名
   - 4. 添加模型 模型id: auto  coder novel task, 如果你需要固定模型例子:openai/gpt-oss-120b 
 
-##### 1.3 查看日志
+### 1.4、 查看日志
 
   - Worker -> observanility
 
 
 
-## 二 快速部署
+## 二、 快速部署
 
 ### 1. 配置 API Key
 
