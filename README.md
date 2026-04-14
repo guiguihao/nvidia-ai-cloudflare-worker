@@ -40,7 +40,7 @@ https://nvidia.guiguihao.cc.cd/v1/status
 - ✅ 支持流式和非流式响应
 - ✅ 自动故障转移和降级机制
 - ✅ CORS 支持
-- ✅ 全局边缘网络加速
+- ✅ 全球边缘网络加速
 
 
 
