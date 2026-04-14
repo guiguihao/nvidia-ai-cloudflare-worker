@@ -56,7 +56,7 @@ https://你的域名/v1/status
    - **API 密钥**：任意填写（未做验证）
    - **API 地址**：你的 Worker 域名
 3. 添加模型：
-   - 智能选择：`auto` / `coder` / `novel` / `task`
+   - 智能选择(四选一)：`auto` / `coder` / `novel` / `task`
    - 固定模型示例：`openai/gpt-oss-120b`
 
 ### 1.4 查看日志
