@@ -505,11 +505,23 @@ export default {
 
   // Cron 定时任务处理（由 Cloudflare 自动触发）
   async scheduled(event, env, ctx) {
-    console.log(`[NVIDIA-CRON] 定时触发探测 (${event.cron})`);
-    // 强制刷新，忽略缓存
-    manager.lastCheck = 0;
-    await manager.fetchAndTestModels(env);
-    console.log("[NVIDIA-CRON] 探测完成");
+    const startTime = Date.now();
+    console.log(`[NVIDIA-CRON] ========== 定时触发探测 (${event.cron}) ==========`);
+    console.log(`[NVIDIA-CRON] 开始时间: ${new Date().toISOString()}`);
+    
+    try {
+      // 强制刷新，忽略缓存
+      manager.lastCheck = 0;
+      await manager.fetchAndTestModels(env);
+      
+      const duration = Date.now() - startTime;
+      console.log(`[NVIDIA-CRON] ========== 探测完成 (耗时: ${duration}ms) ==========`);
+      console.log(`[NVIDIA-CRON] 可用模型数量: ${manager.availableModels.length}`);
+      console.log(`[NVIDIA-CRON] 最佳模型:`, JSON.stringify(manager.bestModels));
+    } catch (error) {
+      console.error(`[NVIDIA-CRON] 探测失败: ${error.message}`, error.stack);
+      throw error; // 重新抛出，让 Cloudflare 记录为失败状态
+    }
   }
 };
 
