@@ -13,32 +13,61 @@
 - ✅ 全局边缘网络加速
 
 ## 一、手动部署
-### 1.1 、部署
-  - 1. Cloudflare 创建 Worker ->start with helloworld
-  - 2. 编辑  直接复制worker.js全部代码 替换helloworld内容
-  - 3. settings -> Variables and Secrets -> add ->Type选择secret -> Variable name填NVIDIA_API_KEY->value填你的nvidia api key
-  - 4. 绑定kv 先创建kv 点击你刚才创建的worker 选择bindings -> add >kv namespase -> Variable name设置NVIDIA_KV ->选择kv
-  - 5. settings -> Trigger Events >Cron Triggers  //自己根据情况设置自动探测时间 5分钟 10分钟 随便都可以
-  - 6. settings -> Custom domain //绑定自定义域名
 
-### 1.3、 查看模型优选状态
-   - 你的域名/v1/status
+### 1.1 部署步骤
 
-### 1.3、 使用cherry 测试
-  - 1. 设置 > 添加 -> 供应商名称 随意填 -> 类型 openai
-  - 2. api 秘钥 随便填 没做验证
-  - 3. api 地址 就是你的域名
-  - 4. 添加模型 模型id: auto  coder novel task, 如果你需要固定模型例子:openai/gpt-oss-120b 
+1. **创建 Worker**
+   - 登录 Cloudflare Dashboard → Workers & Pages → 创建 Worker → 选择 "Start with Hello World"
 
-### 1.4、 查看日志
+2. **部署代码**
+   - 打开 Worker 编辑器，将 `worker.js` 的全部代码复制并替换 Hello World 默认内容
 
-  - Worker -> observanility
+3. **配置 API Key**
+   - 进入 **Settings** → **Variables and Secrets** → **Add**
+   - Type 选择 **Secret**
+   - Variable name 填写 `NVIDIA_API_KEY`
+   - Value 填写你的 NVIDIA API Key（以 `nvapi-` 开头）
 
+4. **绑定 KV 存储**
+   - 先创建 KV 命名空间：**Workers & Pages** → **KV** → **Create**
+   - 点击刚创建的 Worker → **Bindings** → **Add** → 选择 **KV Namespace**
+   - Variable name 设置为 `NVIDIA_KV`，选择刚创建的 KV
 
+5. **配置定时触发器**
+   - 进入 **Settings** → **Triggers** → **Cron Triggers**
+   - 根据需求设置自动探测时间（如 `*/5 * * * *` 每 5 分钟）
 
-## 二、 快速部署
+6. **绑定自定义域名**（可选）
+   - 进入 **Settings** → **Custom Domains** → 添加域名
 
-### 1. 配置 API Key
+### 1.2 查看模型优选状态
+
+访问以下地址查看模型状态：
+```
+https://你的域名/v1/status
+```
+
+### 1.3 使用 Cherry Studio 测试
+
+1. 打开 Cherry Studio → **设置** → **添加供应商**
+2. 填写配置：
+   - **供应商名称**：随意填写
+   - **类型**：选择 `OpenAI`
+   - **API 密钥**：任意填写（未做验证）
+   - **API 地址**：你的 Worker 域名
+3. 添加模型：
+   - 智能选择：`auto` / `coder` / `novel` / `task`
+   - 固定模型示例：`openai/gpt-oss-120b`
+
+### 1.4 查看日志
+
+- 进入 **Worker** → **Observability** 查看运行日志
+
+---
+
+## 二、快速部署
+
+### 2.1 配置 API Key
 
 使用 `wrangler secret` 设置 NVIDIA API Key（推荐）：
 
@@ -47,9 +76,9 @@ wrangler secret put NVIDIA_API_KEY
 # 输入你的 NVIDIA API Key（以 nvapi- 开头）
 ```
 
-> ⚠️ 注意：不建议在 `wrangler.toml` 中硬编码 API Key，以免泄露。
+> ⚠️ **注意**：不建议在 `wrangler.toml` 中硬编码 API Key，以免泄露。
 
-### 2. 本地开发（可选）
+### 2.2 本地开发（可选）
 
 ```bash
 npm install
@@ -58,13 +87,13 @@ npm run dev
 
 这将在 `localhost:8787` 启动开发服务器。
 
-### 3. 部署到 Cloudflare
+### 2.3 部署到 Cloudflare
 
 ```bash
 npm run deploy
 ```
 
-### 4. 配置定时触发器（可选）
+### 2.4 配置定时触发器（可选）
 
 `wrangler.toml` 已配置每 5 分钟自动探测模型状态：
 
