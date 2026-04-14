@@ -10,35 +10,15 @@ const CHECK_INTERVAL = 600 * 1000; // 10分钟
 // 目标模型关键词（精确匹配 NVIDIA API 实际提供的模型）
 // 基于 NVIDIA API 真实可用模型列表筛选（高质量、大参数量）
 const TARGET_KEYWORDS = [
-  // GPT-OSS 系列（OpenAI 开源模型）
-  "openai/gpt-oss-120b",
-  "openai/gpt-oss-20b",
-  // DeepSeek 系列（编程/推理强）
-  "deepseek-ai/deepseek-v3.2",
-  "deepseek-ai/deepseek-v3.1",
-  "deepseek-ai/deepseek-r1-distill-qwen-32b",
-  "deepseek-ai/deepseek-r1-distill-qwen-14b",
-  // Qwen 系列（中文优化）
-  "qwen/qwen3.5-397b-a17b",
-  "qwen/qwen3.5-122b-a10b",
-  "qwen/qwen3-coder-480b-a35b-instruct",
-  "qwen/qwen2.5-coder-32b-instruct",
-  // MiniMax 系列（长文本/创作）
-  "minimaxai/minimax-m2.5",
-  "minimaxai/minimax-m2.7",
-  // Llama 系列（通用对话）
-  "meta/llama-3.1-405b-instruct",
-  "meta/llama-3.3-70b-instruct",
-  "meta/llama-3.1-70b-instruct",
-  // Mistral 系列
-  "mistralai/mistral-large-3-675b-instruct-2512",
-  "mistralai/mistral-large-2-instruct",
-  "mistralai/mistral-medium-3-instruct",
-  "mistralai/mixtral-8x22b-instruct-v0.1",
-  // Nemotron 系列（NVIDIA 自家）
-  "nvidia/nemotron-4-340b-instruct",
-  "nvidia/llama-3.1-nemotron-ultra-253b-v1",
-  "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+  "gpt-oss-120b",
+  "minimaxai",
+  "gemma-4-",
+  "qwen",
+  "glm-5",
+  "deepseek-v3",
+  "kimi-k2.",
+  "llama-3.1-405b-instruct",
+  "mistral-large-3-675b-instruct-2512"
 ];
 
 // 优先级列表（按综合性能、延迟、成本排序）
@@ -47,6 +27,7 @@ const PRIORITY_LIST = [
   // Tier 1: 最强通用模型（最高优先级）
   "qwen/qwen3-coder-480b-a35b-instruct",   // 0 - 代码能力最强
   "deepseek-ai/deepseek-v3.2",              // 1 - 推理/编程强
+  "google/gemma-4-31b-it",
   "qwen/qwen3.5-397b-a17b",                // 2 - 中文优化，参数量大
   "openai/gpt-oss-120b",                   // 3 - OpenAI 开源大模型
   "meta/llama-3.1-405b-instruct",          // 4 - 参数量最大，通用性强
