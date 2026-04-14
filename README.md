@@ -30,7 +30,7 @@ curl https://nvidia.guiguihao.cc.cd/v1/chat/completions \
 ### 查看模型优选状态
 
 ```bash
-curl https://nvidia.guiguihao.cc.cd/v1/status
+https://nvidia.guiguihao.cc.cd/v1/status
 ```
 
 ## 功能特性
@@ -71,6 +71,8 @@ curl https://nvidia.guiguihao.cc.cd/v1/status
 
 6. **绑定自定义域名**（必须,否则可能无法访问, 没有域名可以去申请免费域名https://my.dnshe.com/）
    - 进入 **Settings** → **Custom Domains** → 添加域名
+
+7. **如果想要速度更快[请自行配置优选cdn] 可选**
 
 ### 1.2 查看模型优选状态
 
