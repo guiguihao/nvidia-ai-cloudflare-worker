@@ -12,6 +12,12 @@
 - ✅ CORS 支持
 - ✅ 全局边缘网络加速
 
+## 有python版本,有需要自行部署,自行安装一下依赖
+``` 
+  修改 nvidia_server.py  第19行 self.api_key = "nvapi-xxxxxx"
+  启动方式 pkill -f nvidia_server.py; sleep 3; pkill -9 -f nvidia_server.py; && nohup python3 nvidia_server.py > nvidia_server.log 2>&1 &
+  ```
+
 ## 一、手动部署
 
 ### 1.1 部署步骤
