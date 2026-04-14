@@ -1,0 +1,21 @@
+name = "nvidia-proxy"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Cron Triggers：定时触发模型探测（无需等待请求）
+# 每 5 分钟执行一次
+[triggers]
+crons = ["*/5 * * * *"]
+
+# 可选：如果需要持久化存储模型缓存，可以启用 KV
+# [[kv_namespaces]]
+# binding = "NVIDIA_KV"
+# id = "your-kv-namespace-id"
+
+# 环境变量配置（建议通过 wrangler secret 设置敏感信息）
+[vars]
+# NVIDIA_API_KEY = "nvapi-your-api-key-here"  # 建议使用 wrangler secret put NVIDIA_API_KEY
+
+# 注意：Workers 免费账户可以使用 `wrangler tail` 查看实时日志
+

@@ -1,0 +1,23 @@
+{
+  "name": "nvidia-ai-cloudflare-worker",
+  "version": "1.0.0",
+  "description": "NVIDIA API Proxy running on Cloudflare Workers",
+  "main": "worker.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "nvidia",
+    "proxy",
+    "ai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}
