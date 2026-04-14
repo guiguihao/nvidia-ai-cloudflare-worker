@@ -4,9 +4,9 @@ compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
 # Cron Triggers：定时触发模型探测（无需等待请求）
-# 每 5 分钟执行一次
+# 每 10 分钟执行一次
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["*/10 * * * *"]
 
 # 可选：如果需要持久化存储模型缓存，可以启用 KV
 # [[kv_namespaces]]

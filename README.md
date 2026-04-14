@@ -3,36 +3,6 @@
 
 这是一个运行在 Cloudflare Workers 上的 NVIDIA API 代理服务，支持自动测速、模型分组、降级和故障转移。
 
-这是我自己部署的: https://nvidia.guiguihao.cc.cd  
-### 非流式请求（测试）
-
-```bash
-curl https://nvidia.guiguihao.cc.cd/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "auto",
-    "messages": [{"role": "user", "content": "你好，请用一句话介绍你自己"}]
-  }'
-```
-
-### 流式请求
-
-```bash
-curl https://nvidia.guiguihao.cc.cd/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "coder",
-    "messages": [{"role": "user", "content": "你好，写一个漂亮的html页面"}],
-    "stream": true
-  }'
-```
-
-### 查看模型优选状态
-
-```bash
-https://nvidia.guiguihao.cc.cd/v1/status
-```
-
 ## 功能特性
 
 - ✅ 自动发现和测试 NVIDIA 可用模型
@@ -91,7 +61,9 @@ https://你的域名/v1/status
    - **API 地址**：你的 Worker 域名
 3. 添加模型：
    - 智能选择(四选一)：`auto` / `coder` / `novel` / `task`
-   - 固定模型示例：`openai/gpt-oss-120b`
+   - 指定任意模型：`openai/gpt-oss-120b`、`deepseek-ai/deepseek-v3.2` 等
+
+> 💡 **提示**：当你指定模型时（如 `openai/gpt-oss-120b`），系统会优先使用该模型。如果该模型不可用，会自动降级到列表中其他可用模型。
 
 ### 1.4 查看日志
 

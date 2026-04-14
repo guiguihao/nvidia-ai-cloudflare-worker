@@ -330,11 +330,35 @@ class NvidiaManager {
     let fallbackModels = [];
     let profile = "auto";
 
-    if (reqModel && this.availableModels.includes(reqModel)) {
-      // 用户显式指定了特定模型
-      targetModel = reqModel;
-      fallbackModels = [reqModel, ...this.availableModels.filter(m => m !== reqModel)];
+    // 检查是否为分组模式关键词
+    const GROUP_KEYS = ["auto", "coder", "novel", "task"];
+
+    if (reqModel && GROUP_KEYS.includes(reqModel.toLowerCase())) {
+      // 分组模式：使用对应分组的模型列表
+      const groupKey = reqModel.toLowerCase();
+      profile = groupKey;
+      const groupList = this.optimalGroups[groupKey] || [];
+      if (groupList.length === 0) {
+        // 如果分组为空，使用 auto 兜底
+        fallbackModels = this.optimalGroups.auto || ["meta/llama-3.1-405b-instruct", "meta/llama-3.3-70b-instruct"];
+      } else {
+        fallbackModels = groupList;
+      }
+      targetModel = fallbackModels[0];
+      console.log(`[NVIDIA] 分组模式 [${groupKey.toUpperCase()}] 使用 ${fallbackModels.length} 个模型`);
+    } else if (reqModel) {
+      // 用户显式指定了特定模型（如 openai/gpt-oss-120b）
       profile = "EXPLICIT";
+      targetModel = reqModel;
+
+      if (this.availableModels.includes(reqModel)) {
+        // 如果该模型在测速列表中，优先使用它，然后备选其他可用模型
+        fallbackModels = [reqModel, ...this.availableModels.filter(m => m !== reqModel)];
+      } else {
+        // 如果该模型不在测速列表中，直接使用用户指定的模型，然后备选所有可用模型
+        fallbackModels = [reqModel, ...this.availableModels];
+        console.log(`[NVIDIA] 用户指定模型 ${reqModel} 不在测速列表中，将直接使用该模型`);
+      }
     } else {
       // 从全局测速最优序列中选择
       profile = "auto";
