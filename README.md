@@ -4,25 +4,10 @@
 这是一个运行在 Cloudflare Workers 上的 NVIDIA API 代理服务，支持自动测速、模型分组、降级和故障转移。
 
 这是我自己部署的: https://nvidia.guiguihao.cc.cd  
-
-
-## 功能特性
-
-- ✅ 自动发现和测试 NVIDIA 可用模型
-- ✅ 根据延迟和优先级智能分组模型 (auto/coder/novel/task)
-- ✅ 支持流式和非流式响应
-- ✅ 自动故障转移和降级机制
-- ✅ CORS 支持
-- ✅ 全局边缘网络加速
-
-## 快速测试
-
-将 `https://your-domain` 替换为你的 Worker 域名，直接使用以下 curl 命令测试：
-
-### 非流式请求（推荐先测试）
+### 非流式请求（测试）
 
 ```bash
-curl https://your-domain/v1/chat/completions \
+curl https://nvidia.guiguihao.cc.cd/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "auto",
@@ -33,11 +18,11 @@ curl https://your-domain/v1/chat/completions \
 ### 流式请求
 
 ```bash
-curl https://your-domain/v1/chat/completions \
+curl https://nvidia.guiguihao.cc.cd/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "coder",
-    "messages": [{"role": "user", "content": "写一个 Python Hello World"}],
+    "messages": [{"role": "user", "content": "你好，写一个漂亮的html页面"}],
     "stream": true
   }'
 ```
@@ -45,8 +30,17 @@ curl https://your-domain/v1/chat/completions \
 ### 查看模型优选状态
 
 ```bash
-curl https://your-domain/v1/status
+curl https://nvidia.guiguihao.cc.cd/v1/status
 ```
+
+## 功能特性
+
+- ✅ 自动发现和测试 NVIDIA 可用模型
+- ✅ 根据延迟和优先级智能分组模型 (auto/coder/novel/task)
+- ✅ 支持流式和非流式响应
+- ✅ 自动故障转移和降级机制
+- ✅ CORS 支持
+- ✅ 全局边缘网络加速
 
 
 
