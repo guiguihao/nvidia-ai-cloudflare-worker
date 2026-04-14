@@ -12,11 +12,7 @@
 - ✅ CORS 支持
 - ✅ 全局边缘网络加速
 
-## 有python版本,有需要自行部署,自行安装一下依赖
-``` 
-  修改 nvidia_server.py  第19行 self.api_key = "nvapi-xxxxxx"
-  启动方式 pkill -f nvidia_server.py; sleep 3; pkill -9 -f nvidia_server.py; && nohup python3 nvidia_server.py > nvidia_server.log 2>&1 &
-  ```
+
 
 ## 一、手动部署
 
@@ -188,11 +184,10 @@ wrangler tail
 - HTTP 400 且包含 "unsupported" / "Extra inputs" / "tool" (参数不兼容)
 - 请求超时 (60秒)
 
-## 注意事项
 
-1. **API Key 安全**：建议使用 `wrangler secret` 存储 API Key，不要硬编码在代码中
-2. **超时限制**：Cloudflare Workers 免费版本单次请求超时为 10 秒，付费版本为 30 秒
-3. **内存限制**：Workers 内存限制为 128MB，模型列表存储在内存中
+## 有python版本,有需要自行部署,自行安装一下依赖
+``` 
+  修改 nvidia_server.py  第19行 self.api_key = "nvapi-xxxxxx"
+  启动方式 pkill -f nvidia_server.py; sleep 3; pkill -9 -f nvidia_server.py; && nohup python3 nvidia_server.py > nvidia_server.log 2>&1 &
+  ```
 
-
-#
