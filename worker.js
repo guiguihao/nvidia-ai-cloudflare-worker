@@ -1,688 +1,329 @@
 /**
- * NVIDIA API Proxy - Cloudflare Workers 版本
- * 自动测速、分组、降级和故障转移
+ * NVIDIA API Proxy - Cloudflare Workers (Ultimate Edition)
+ * 极致优化：零拷贝流转发、内存 TTL 防老化、串行探测防限流、智能回退
  */
 
 // ==================== 配置 ====================
 const NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1";
-const CHECK_INTERVAL = 600 * 1000; // 10分钟
 
-// 目标模型关键词（精确匹配 NVIDIA API 实际提供的模型）
-// 基于 NVIDIA API 真实可用模型列表筛选（高质量、大参数量）
 const TARGET_KEYWORDS = [
-  "gpt-oss-120b",
-  "minimaxai",
-  "gemma-4-",
-  "qwen",
-  "glm-5",
-  "deepseek-v3",
-  "kimi-k2.",
-  "llama-3.1-405b-instruct",
-  "mistral-large-3-675b-instruct-2512"
+  "gpt-oss-120b", "minimaxai", "gemma-4-", "qwen", "glm-5",
+  "deepseek-v3", "kimi-k2.", "llama-3.1-405b", "mistral-large-3"
 ];
 
-// 优先级列表（按综合性能、延迟、成本排序）
-// 评分越低优先级越高，用于 modelSortScore 函数
 const PRIORITY_LIST = [
-  // Tier 1: 最强通用模型（最高优先级）
-  "qwen/qwen3-coder-480b-a35b-instruct",   // 0 - 代码能力最强
-  "deepseek-ai/deepseek-v3.2",              // 1 - 推理/编程强
+  "qwen/qwen3-coder-480b-a35b-instruct",
+  "deepseek-ai/deepseek-v3.2",
   "google/gemma-4-31b-it",
-  "qwen/qwen3.5-397b-a17b",                // 2 - 中文优化，参数量大
-  "openai/gpt-oss-120b",                   // 3 - OpenAI 开源大模型
-  "meta/llama-3.1-405b-instruct",          // 4 - 参数量最大，通用性强
-  // Tier 2: 高质量备选
-  "mistralai/mistral-large-3-675b-instruct-2512", // 5 - 最新大模型
-  "deepseek-ai/deepseek-v3.1",              // 6
-  "minimaxai/minimax-m2.7",                // 7 - 长文本擅长
-  "minimaxai/minimax-m2.5",                // 8
-  "nvidia/nemotron-4-340b-instruct",       // 9 - NVIDIA 自家优化
-  "qwen/qwen3.5-122b-a10b",               // 10
-  // Tier 3: 中等模型（延迟更低）
-  "meta/llama-3.3-70b-instruct",           // 11
-  "meta/llama-3.1-70b-instruct",           // 12
-  "mistralai/mistral-large-2-instruct",    // 13
-  "mistralai/mixtral-8x22b-instruct-v0.1", // 14
-  "nvidia/llama-3.3-nemotron-super-49b-v1.5", // 15
-  "deepseek-ai/deepseek-r1-distill-qwen-32b", // 16
+  "qwen/qwen3.5-397b-a17b",
+  "openai/gpt-oss-120b",
+  "meta/llama-3.1-405b-instruct",
+  "mistralai/mistral-large-3-675b-instruct-2512",
+  "deepseek-ai/deepseek-v3.1",
+  "minimaxai/minimax-m2.7",
+  "minimaxai/minimax-m2.5",
+  "nvidia/nemotron-4-340b-instruct",
+  "qwen/qwen3.5-122b-a10b",
+  "meta/llama-3.3-70b-instruct",
+  "mistralai/mistral-large-2-instruct"
 ];
 
 // ==================== 状态管理 ====================
 class NvidiaManager {
   constructor() {
-    this.apiKey = null; // 从环境变量读取
+    this.apiKey = null;
     this.bestModels = { auto: null, coder: null, novel: null, task: null };
     this.optimalGroups = { auto: [], coder: [], novel: [], task: [] };
     this.availableModels = [];
-    this.modelLatencies = {}; // 存储每个模型的延迟
+    this.modelLatencies = {};
     this.lastCheck = 0;
-    this.checkPromise = null;
+    this.lastKVFetch = 0; // 新增：记录上次读取 KV 的时间
   }
 
-  // 从环境变量或 KV 获取 API Key
   async loadApiKey(env) {
+    if (this.apiKey) return;
     if (env.NVIDIA_API_KEY) {
       this.apiKey = env.NVIDIA_API_KEY;
-      console.log(`[NVIDIA] 从环境变量加载 API Key (*${this.apiKey.slice(-4)})`);
       return;
     }
-
-    // 尝试从 KV 读取
     if (env.NVIDIA_KV) {
       try {
         const key = await env.NVIDIA_KV.get("api_key");
         if (key && key.startsWith("nvapi-")) {
           this.apiKey = key;
-          console.log(`[NVIDIA] 从 KV 加载 API Key (*${this.apiKey.slice(-4)})`);
           return;
         }
-      } catch (e) {
-        console.log("[NVIDIA] KV 读取失败");
-      }
+      } catch (e) {}
     }
-
-    throw new Error("[NVIDIA] 未配置 API Key！请通过 wrangler secret put NVIDIA_API_KEY 设置");
+    throw new Error("[NVIDIA] 未配置 API Key！");
   }
 
-  // 判断是否为目标模型
+  // 优化 2：内存 TTL 机制，防止活跃节点数据老化
+  async loadStateFromKV(env) {
+    const now = Date.now();
+    // 内存数据有效且距离上次查 KV 不到 60 秒，直接使用内存
+    if (this.availableModels.length > 0 && (now - this.lastKVFetch) < 60000) return;
+    
+    if (env.NVIDIA_KV) {
+      try {
+        const stateStr = await env.NVIDIA_KV.get("nvidia_proxy_state");
+        if (stateStr) {
+          const state = JSON.parse(stateStr);
+          this.availableModels = state.availableModels || [];
+          this.bestModels = state.bestModels || this.bestModels;
+          this.optimalGroups = state.optimalGroups || this.optimalGroups;
+          this.lastCheck = state.lastCheck || 0;
+          this.lastKVFetch = now; // 更新拉取时间
+        }
+      } catch (e) {}
+    }
+  }
+
+  async saveStateToKV(env) {
+    if (env.NVIDIA_KV) {
+      try {
+        const state = {
+          availableModels: this.availableModels,
+          bestModels: this.bestModels,
+          optimalGroups: this.optimalGroups,
+          lastCheck: this.lastCheck
+        };
+        await env.NVIDIA_KV.put("nvidia_proxy_state", JSON.stringify(state));
+      } catch (e) {}
+    }
+  }
+
   isTargetModel(modelId) {
     const midLower = modelId.toLowerCase();
     return TARGET_KEYWORDS.some(sub => midLower.includes(sub));
   }
 
-  // 测试模型延迟（缩短超时以适配 Workers 限制）
   async testModelLatency(model, headers) {
-    const testPayload = {
-      model: model,
-      messages: [{ role: "user", content: "ok" }],
-      max_tokens: 3
-    };
-
     const startTime = Date.now();
     let res;
     try {
       res = await fetch(`${NVIDIA_API_URL}/chat/completions`, {
         method: "POST",
         headers,
-        body: JSON.stringify(testPayload),
-        signal: AbortSignal.timeout(4000) // 4秒超时（适配 Workers）
+        body: JSON.stringify({ model: model, messages: [{ role: "user", content: "ok" }], max_tokens: 3 }),
+        signal: AbortSignal.timeout(10000)
       });
 
       if (res.ok) {
         const elapsed = (Date.now() - startTime) / 1000;
-        console.log(`✅ [NVIDIA-TEST] ${model}: ${elapsed.toFixed(2)}s`);
-        // 读取并丢弃响应体，释放连接
-        await res.arrayBuffer();
-        // 保存延迟数据
+        console.log(`✅ [TEST] ${model}: ${elapsed.toFixed(2)}s`);
+        await res.arrayBuffer(); // 清理内存
         this.modelLatencies[model] = elapsed;
         return { model, latency: elapsed };
       } else {
-        console.log(`❌ [NVIDIA-TEST] ${model}: HTTP ${res.status}`);
-        // 读取并丢弃错误响应体，释放连接
+        console.log(`❌ [TEST] ${model}: HTTP ${res.status}`);
         await res.arrayBuffer();
         return { model, latency: -1 };
       }
     } catch (e) {
-      console.log(`❌ [NVIDIA-TEST] ${model}: ${e.message}`);
-      // 如果有响应但未完成，尝试取消
-      if (res && res.body) {
-        try { await res.body.cancel(); } catch(e) {}
-      }
+      console.log(`❌ [TEST] ${model}: 超时/异常`);
+      if (res && res.body) try { await res.body.cancel(); } catch(e) {}
       return { model, latency: -1 };
     }
   }
 
-  // 模型排序分数（综合考虑优先级和延迟）
   modelSortScore(modelId) {
     const ml = modelId.toLowerCase();
-    // 精确匹配 PRIORITY_LIST
     for (let i = 0; i < PRIORITY_LIST.length; i++) {
-      if (ml === PRIORITY_LIST[i].toLowerCase() || ml.includes(PRIORITY_LIST[i].toLowerCase())) {
-        return i;
-      }
+      if (ml === PRIORITY_LIST[i].toLowerCase() || ml.includes(PRIORITY_LIST[i].toLowerCase())) return i;
     }
-    // 模糊匹配（兜底）
-    if (ml.includes("qwen") && ml.includes("coder")) return 10;
-    if (ml.includes("deepseek")) return 11;
-    if (ml.includes("qwen")) return 12;
-    if (ml.includes("gpt-oss")) return 13;
-    if (ml.includes("minimax")) return 14;
-    if (ml.includes("mistral")) return 15;
-    if (ml.includes("nemotron")) return 16;
-    if (ml.includes("llama")) return 20;
-    return 1000; // 未知模型最低优先级
+    return 1000;
   }
 
-  // 计算综合评分（延迟 <= 1.5s 视为同等快速，不产生差异）
   calculateCompositeScore(model) {
     const priorityScore = this.modelSortScore(model);
     const latency = this.modelLatencies[model];
-    
-    // 归一化优先级（0-16 → 0-1）
     const normalizedPriority = Math.min(priorityScore, 16) / 16;
-    
-    // 延迟阈值：1.5s内的模型视为"同样快"
-    const LATENCY_THRESHOLD = 1.5;
-    const normalizedLatency = !latency ? 1 :
-      latency <= LATENCY_THRESHOLD ? 0 : // 1.5s内延迟权重为0
-      Math.min((latency - LATENCY_THRESHOLD) / 10, 1); // 超过部分归一化
-
-    // 综合得分：优先级 60% + 延迟惩罚 40%
-    const compositeScore = normalizedPriority * 0.6 + normalizedLatency * 0.4;
-    
-    return {
-      priorityScore,
-      latency: latency ? parseFloat(latency.toFixed(2)) : null,
-      compositeScore: parseFloat(compositeScore.toFixed(4)),
-    };
+    const normalizedLatency = !latency ? 1 : latency <= 1.5 ? 0 : Math.min((latency - 1.5) / 10, 1);
+    return { priorityScore, latency: latency ? parseFloat(latency.toFixed(2)) : null, compositeScore: parseFloat((normalizedPriority * 0.6 + normalizedLatency * 0.4).toFixed(4)) };
   }
 
-  // 获取并测试模型
   async fetchAndTestModels(env) {
-    // 如果距离上次检查不到5分钟，且已有缓存，直接返回
-    const now = Date.now();
-    if (this.availableModels.length > 0 && (now - this.lastCheck) < 300000) {
-      return;
-    }
-
-    // 防止并发重复检查
-    if (this.checkPromise) {
-      return this.checkPromise;
-    }
-
-    this.checkPromise = this._doFetchAndTest(env);
-    try {
-      await this.checkPromise;
-    } finally {
-      this.checkPromise = null;
-    }
-  }
-
-  async _doFetchAndTest(env) {
-    console.log("\n[NVIDIA] 开始进行内部探测，检查并测试指定模型响应速度...");
+    console.log("\n[NVIDIA] 开始执行探测...");
     await this.loadApiKey(env);
-
-    const headers = {
-      "Authorization": `Bearer ${this.apiKey}`,
-      "Content-Type": "application/json"
-    };
+    const headers = { "Authorization": `Bearer ${this.apiKey}`, "Content-Type": "application/json" };
 
     try {
-      // 获取模型列表
-      const res = await fetch(`${NVIDIA_API_URL}/models`, {
-        method: "GET",
-        headers,
-        signal: AbortSignal.timeout(10000)
-      });
+      const res = await fetch(`${NVIDIA_API_URL}/models`, { method: "GET", headers, signal: AbortSignal.timeout(10000) });
+      if (!res.ok) return;
 
-      if (!res.ok) {
-        console.log(`[ERROR] 获取模型列表失败，状态码 HTTP ${res.status}`);
-        return;
-      }
-
-      const modelsData = await res.json();
-      const fetchedModels = (modelsData.data || []).map(m => m.id);
+      const fetchedModels = (await res.json()).data.map(m => m.id);
       const targetModels = fetchedModels.filter(m => this.isTargetModel(m));
-      console.log(`[NVIDIA] 过滤后的目标模型 (${targetModels.length}个): ${JSON.stringify(targetModels)}`);
-
-      // 全并发测试（使用短超时避免阻塞）
-      // 每个模型最多等待 5 秒，整体最多 15 秒
-      const testPromises = targetModels.map(m => 
-        Promise.race([
-          this.testModelLatency(m, headers),
-          new Promise(resolve => setTimeout(() => resolve({ model: m, latency: -1 }), 5000))
-        ])
-      );
       
-      const results = await Promise.allSettled(testPromises);
-      const validResults = results
-        .filter(r => r.status === 'fulfilled')
-        .map(r => r.value);
+      // 优化 3：取消并发，完全串行探测，防止 429 限流
+      const validResults = [];
+      for (const m of targetModels) {
+        const result = await Promise.race([
+          this.testModelLatency(m, headers),
+          new Promise(resolve => setTimeout(() => resolve({ model: m, latency: -1 }), 12000))
+        ]);
+        if (result && result.latency > 0) {
+          validResults.push(result);
+        }
+      }
 
-      const validModels = validResults.filter(r => r.latency > 0);
-      validModels.sort((a, b) => a.latency - b.latency);
-
-      if (validModels.length === 0) {
-        console.log("[NVIDIA] ⚠️ 所有目标模型探测失败，保留原分组。");
+      if (validResults.length === 0) {
+        console.log("⚠️ 所有模型探测失败");
         return;
       }
 
-      const sortedModelIds = validModels.map(r => r.model);
+      const sortedModelIds = validResults.sort((a, b) => a.latency - b.latency).map(r => r.model);
       this.availableModels = sortedModelIds;
-      console.log(`[NVIDIA] 所有可用模型: ${JSON.stringify(sortedModelIds)}`);
 
-      // 综合评分排序（延迟 <= 1.5s 视为同等快速，仅按优先级排序）
-      const prioritizedModels = sortedModelIds.sort((a, b) => {
-        const scoreA = this.calculateCompositeScore(a);
-        const scoreB = this.calculateCompositeScore(b);
-        return scoreA.compositeScore - scoreB.compositeScore;
-      });
-
-      console.log(`[NVIDIA] 综合评分排序: ${prioritizedModels.map(m => {
-        const s = this.calculateCompositeScore(m);
-        return `${m}(${s.latency}s,pri=${s.priorityScore},score=${s.compositeScore})`;
-      }).join(', ')}`);
-
-      // 智能分组（根据模型特性精准分类）
+      const prioritizedModels = sortedModelIds.sort((a, b) => this.calculateCompositeScore(a).compositeScore - this.calculateCompositeScore(b).compositeScore);
       const newGroups = { auto: [...prioritizedModels], coder: [], novel: [], task: [] };
 
       for (const mid of prioritizedModels) {
-        const midLower = mid.toLowerCase();
-        
-        // 编程组（推理/代码能力强）
-        if (midLower.includes("coder") ||                      // 专用编程模型
-            (midLower.includes("deepseek") && !midLower.includes("distill")) ||  // DeepSeek 主模型
-            midLower.includes("qwen") ||                       // Qwen 代码能力好
-            midLower.includes("gpt-oss")) {                    // GPT-OSS 代码强
-          newGroups.coder.push(mid);
-        }
-        
-        // 小说组（长文本/创作能力强）
-        if (midLower.includes("minimax") ||                    // MiniMax 擅长长文本
-            midLower.includes("mixtral") ||                    // Mixtral MoE 适合创作
-            midLower.includes("mistral-large-3") ||            // 最新大模型质量好
-            (midLower.includes("llama") && midLower.includes("405b"))) {  // 超大模型
-          newGroups.novel.push(mid);
-        }
-        
-        // 任务组（通用/多任务处理）
-        if (midLower.includes("llama") ||                      // Llama 通用性好
-            midLower.includes("nemotron") ||                   // Nemotron 任务优化
-            midLower.includes("mistral") ||                    // Mistral 多任务
-            midLower.includes("405b") ||                       // 大模型
-            midLower.includes("397b") ||                       // Qwen 大模型
-            midLower.includes("675b")) {                       // Mistral 超大模型
-          newGroups.task.push(mid);
-        }
+        const ml = mid.toLowerCase();
+        if (ml.includes("coder") || (ml.includes("deepseek") && !ml.includes("distill")) || ml.includes("gpt-oss")) newGroups.coder.push(mid);
+        if (ml.includes("minimax") || ml.includes("mixtral") || ml.includes("mistral-large-3") || ml.includes("405b")) newGroups.novel.push(mid);
+        if (ml.includes("llama") || ml.includes("nemotron") || ml.includes("mistral") || ml.includes("397b")) newGroups.task.push(mid);
       }
 
-      // 兜底策略：如果某组为空，使用 auto 组的所有模型
-      for (const g of ["coder", "novel", "task"]) {
-        if (newGroups[g].length === 0) {
-          newGroups[g] = [...prioritizedModels];
-        } else {
-          // 将其他模型作为备选补充
-          for (const mid of prioritizedModels) {
-            if (!newGroups[g].includes(mid)) {
-              newGroups[g].push(mid);
-            }
-          }
-        }
-      }
+      ["coder", "novel", "task"].forEach(g => {
+        if (newGroups[g].length === 0) newGroups[g] = [...prioritizedModels];
+        else prioritizedModels.forEach(mid => { if (!newGroups[g].includes(mid)) newGroups[g].push(mid); });
+      });
 
       this.optimalGroups = newGroups;
-      for (const g of ["auto", "coder", "novel", "task"]) {
-        if (newGroups[g].length > 0) {
-          this.bestModels[g] = newGroups[g][0];
-          console.log(`✨ [NVIDIA-${g.toUpperCase()}] 智能分组首选: ${newGroups[g][0]}`);
-        }
-      }
-
+      ["auto", "coder", "novel", "task"].forEach(g => { if (newGroups[g].length > 0) this.bestModels[g] = newGroups[g][0]; });
+      
       this.lastCheck = Date.now();
+      await this.saveStateToKV(env);
     } catch (e) {
-      console.log(`[ERROR] 探测网络异常: ${e.message}`);
+      console.log(`[ERROR] 探测异常: ${e.message}`);
     }
   }
 
-  // 获取目标模型
   getTargetModel(reqModel) {
-    let targetModel = null;
-    let fallbackModels = [];
-    let profile = "auto";
-
-    // 检查是否为分组模式关键词
+    let profile = "auto", targetModel = null, fallbackModels = [];
     const GROUP_KEYS = ["auto", "coder", "novel", "task"];
 
     if (reqModel && GROUP_KEYS.includes(reqModel.toLowerCase())) {
-      // 分组模式：使用对应分组的模型列表
-      const groupKey = reqModel.toLowerCase();
-      profile = groupKey;
-      const groupList = this.optimalGroups[groupKey] || [];
-      if (groupList.length === 0) {
-        // 如果分组为空，使用 auto 兜底
-        fallbackModels = this.optimalGroups.auto || ["meta/llama-3.1-405b-instruct", "meta/llama-3.3-70b-instruct"];
-      } else {
-        fallbackModels = groupList;
-      }
-      targetModel = fallbackModels[0];
-      console.log(`[NVIDIA] 分组模式 [${groupKey.toUpperCase()}] 使用 ${fallbackModels.length} 个模型`);
+      profile = reqModel.toLowerCase();
+      fallbackModels = this.optimalGroups[profile]?.length ? this.optimalGroups[profile] : (this.optimalGroups.auto || ["meta/llama-3.1-405b-instruct"]);
     } else if (reqModel) {
-      // 用户显式指定了特定模型（如 openai/gpt-oss-120b）
       profile = "EXPLICIT";
-      targetModel = reqModel;
-
-      if (this.availableModels.includes(reqModel)) {
-        // 如果该模型在测速列表中，优先使用它，然后备选其他可用模型
-        fallbackModels = [reqModel, ...this.availableModels.filter(m => m !== reqModel)];
-      } else {
-        // 如果该模型不在测速列表中，直接使用用户指定的模型，然后备选所有可用模型
-        fallbackModels = [reqModel, ...this.availableModels];
-        console.log(`[NVIDIA] 用户指定模型 ${reqModel} 不在测速列表中，将直接使用该模型`);
-      }
+      fallbackModels = this.availableModels.includes(reqModel) ? [reqModel, ...this.availableModels.filter(m => m !== reqModel)] : [reqModel, ...this.availableModels];
     } else {
-      // 从全局测速最优序列中选择
-      profile = "auto";
-      const groupList = this.optimalGroups.auto || [];
-      if (groupList.length === 0) {
-        // 极限制兜底
-        fallbackModels = ["meta/llama-3.1-405b-instruct", "meta/llama-3.3-70b-instruct"];
-      } else {
-        fallbackModels = groupList;
-      }
-      targetModel = fallbackModels[0];
+      fallbackModels = this.optimalGroups.auto || ["meta/llama-3.1-405b-instruct"];
     }
-
-    return { targetModel, fallbackModels, profile };
-  }
-
-  // 简化消息格式
-  simplifyMessages(messages) {
-    return messages.map(m => {
-      if (m.content && Array.isArray(m.content)) {
-        const textContent = m.content
-          .filter(item => item.type === "text")
-          .map(item => item.text || "")
-          .join("");
-        return { ...m, content: textContent };
-      }
-      return m;
-    });
-  }
-
-  // 过滤不兼容参数
-  filterPayload(payload) {
-    const filtered = { ...payload };
-    if ("max_completion_tokens" in filtered) {
-      const mcTokens = filtered.max_completion_tokens;
-      delete filtered.max_completion_tokens;
-      if (!("max_tokens" in filtered)) {
-        filtered.max_tokens = mcTokens;
-      }
-    }
-    return filtered;
+    return { targetModel: fallbackModels[0], fallbackModels, profile };
   }
 }
 
-// 全局管理器实例
 const manager = new NvidiaManager();
 
-// ==================== Workers 主逻辑 ====================
 export default {
-  // HTTP 请求处理
   async fetch(request, env, ctx) {
-    // 处理 CORS
     if (request.method === "OPTIONS") {
-      return new Response(null, {
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        }
-      });
+      return new Response(null, { headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization" } });
     }
 
     const url = new URL(request.url);
-    
-    // 调试端点：GET /v1/status 查看当前状态
+    try {
+      await manager.loadApiKey(env);
+      await manager.loadStateFromKV(env);
+    } catch (e) {
+      return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { "Content-Type": "application/json" } });
+    }
+
+    if (url.pathname === "/v1/update" && request.method === "GET") {
+      manager.lastCheck = 0;
+      await manager.fetchAndTestModels(env);
+      return new Response(JSON.stringify({ success: true, models: manager.availableModels }), { headers: { "Content-Type": "application/json" } });
+    }
+
+    // 恢复 /v1/status 接口
     if (url.pathname === "/v1/status" && request.method === "GET") {
-      // 如果没有缓存，触发一次探测并等待
-      if (manager.availableModels.length === 0) {
-        await manager.fetchAndTestModels(env);
-      }
-      
-      // 构建带延迟和评分的模型详情
       const modelDetails = manager.availableModels.map(model => {
         const scoreInfo = manager.calculateCompositeScore(model);
-        return {
-          model,
-          ...scoreInfo,
-        };
+        return { model, ...scoreInfo };
       });
-      
-      // 按综合评分排序
       modelDetails.sort((a, b) => a.compositeScore - b.compositeScore);
       
       return new Response(JSON.stringify({
+        note: "探测由 Cron 定时任务执行，状态通过 KV 跨节点同步。若需手动触发全量测速并查看日志，请访问 /v1/update",
         availableModels: manager.availableModels,
         modelDetails,
         bestModels: manager.bestModels,
         optimalGroups: manager.optimalGroups,
         lastCheck: manager.lastCheck,
-        targetKeywords: TARGET_KEYWORDS,
-        priorityList: PRIORITY_LIST,
+        lastKVFetch: manager.lastKVFetch
       }, null, 2), {
         headers: { "Content-Type": "application/json" }
       });
     }
 
-    // 只在 POST /v1/chat/completions 时处理
-    if (url.pathname !== "/v1/chat/completions" || request.method !== "POST") {
-      return new Response("Not Found", { status: 404 });
-    }
+    if (url.pathname !== "/v1/chat/completions" || request.method !== "POST") return new Response("Not Found", { status: 404 });
 
-    // 后台触发模型检查（不阻塞请求）
-    // fetchAndTestModels 内部会检查是否超过 10 分钟，自动决定是否刷新
-    ctx.waitUntil(manager.fetchAndTestModels(env));
-
-    // 解析请求
     let payload;
-    try {
-      payload = await request.json();
-    } catch (e) {
-      return new Response(JSON.stringify({ error: "Invalid JSON payload" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" }
-      });
-    }
+    try { payload = await request.json(); } catch (e) { return new Response("Invalid JSON", { status: 400 }); }
 
-    const reqModel = payload.model || "";
-    const stream = payload.stream || false;
+    const { targetModel, fallbackModels, profile } = manager.getTargetModel(payload.model);
+    console.log(`\n[PROXY] 请求匹配 [${profile.toUpperCase()}], 首选: ${targetModel} (Stream=${!!payload.stream})`);
 
-    // 获取目标模型
-    const { targetModel, fallbackModels, profile } = manager.getTargetModel(reqModel);
-    console.log(`\n[PROXY-REQ] 收到请求(${reqModel}) -> 匹配模式 [${profile.toUpperCase()}], 引流至首选: ${targetModel} (Stream=${stream})`);
-
-    // 准备请求头
-    const headers = {
-      "Authorization": `Bearer ${manager.apiKey}`,
-      "Content-Type": "application/json"
-    };
-
-    // 简化消息并过滤参数
+    // 清理载荷
     if (payload.messages) {
-      payload.messages = manager.simplifyMessages(payload.messages);
+      payload.messages = payload.messages.map(m => ({
+        ...m, content: Array.isArray(m.content) ? m.content.filter(i => i.type === "text").map(i => i.text).join("") : m.content
+      }));
     }
-    payload = manager.filterPayload(payload);
-
-    // 处理流式响应
-    if (stream) {
-      return handleStreamResponse(payload, fallbackModels, headers, profile, env, ctx);
+    if ("max_completion_tokens" in payload) {
+      payload.max_tokens = payload.max_tokens || payload.max_completion_tokens;
+      delete payload.max_completion_tokens;
     }
 
-    // 处理非流式响应
-    return handleNonStreamResponse(payload, fallbackModels, headers, profile, env, ctx);
+    const headers = { "Authorization": `Bearer ${manager.apiKey}`, "Content-Type": "application/json" };
+    return handleProxyRequest(payload, fallbackModels, headers, profile);
   },
 
-  // Cron 定时任务处理（由 Cloudflare 自动触发）
   async scheduled(event, env, ctx) {
-    const startTime = Date.now();
-    console.log(`[NVIDIA-CRON] ========== 定时触发探测 (${event.cron}) ==========`);
-    console.log(`[NVIDIA-CRON] 开始时间: ${new Date().toISOString()}`);
-    
-    try {
-      // 强制刷新，忽略缓存
-      manager.lastCheck = 0;
-      await manager.fetchAndTestModels(env);
-      
-      const duration = Date.now() - startTime;
-      console.log(`[NVIDIA-CRON] ========== 探测完成 (耗时: ${duration}ms) ==========`);
-      console.log(`[NVIDIA-CRON] 可用模型数量: ${manager.availableModels.length}`);
-      console.log(`[NVIDIA-CRON] 最佳模型:`, JSON.stringify(manager.bestModels));
-    } catch (error) {
-      console.error(`[NVIDIA-CRON] 探测失败: ${error.message}`, error.stack);
-      throw error; // 重新抛出，让 Cloudflare 记录为失败状态
-    }
+    await manager.fetchAndTestModels(env);
   }
 };
 
-// ==================== 流式响应处理 ====================
-async function handleStreamResponse(payload, fallbackModels, headers, profile, env, ctx) {
-  const { readable, writable } = new TransformStream();
-  const writer = writable.getWriter();
-  const encoder = new TextEncoder();
-
-  // 后台执行流式请求
-  ctx.waitUntil((async () => {
-    try {
-      for (const currentModel of fallbackModels) {
-        const modelPayload = { ...payload, model: currentModel };
-        try {
-          const res = await fetch(`${NVIDIA_API_URL}/chat/completions`, {
-            method: "POST",
-            headers,
-            body: JSON.stringify(modelPayload),
-            signal: AbortSignal.timeout(60000)
-          });
-
-          if (res.status === 429 || res.status >= 500) {
-            console.log(`⚠️ [${profile.toUpperCase()}-WARN] ${currentModel} 异常(${res.status})，切往下一节点...`);
-            continue;
-          }
-
-          if (!res.ok) {
-            const errText = await res.text();
-            if (res.status === 400 && (errText.includes("unsupported") || errText.includes("Extra inputs") || errText.includes("tool"))) {
-              console.log(`⚠️ [${profile.toUpperCase()}-WARN] ${currentModel} 组件交互不兼容(400)，尝试降级节点...`);
-              continue;
-            }
-            console.log(`❌ [${profile.toUpperCase()}-ERR] 致命错误 (${res.status}): ${errText}`);
-            await writer.write(encoder.encode(`data: ${JSON.stringify({ error: errText })}\n\n`));
-            await writer.write(encoder.encode("data: [DONE]\n\n"));
-            break;
-          }
-
-          console.log(`🚀 [${profile.toUpperCase()}-OK] 成功接通底层模型 ${currentModel}，开始流式泵送...`);
-          
-          // 流式读取并转发
-          const reader = res.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split("\n");
-              buffer = lines.pop() || "";
-
-              for (const line of lines) {
-                if (line.trim()) {
-                  await writer.write(encoder.encode(`${line}\n\n`));
-                  
-                  // 解析并打印内容
-                  if (line.startsWith("data:") && !line.includes("[DONE]")) {
-                    try {
-                      const jsonStr = line.replace("data:", "").trim();
-                      const dataJson = JSON.parse(jsonStr);
-                      if (dataJson.choices && dataJson.choices.length > 0) {
-                        const content = dataJson.choices[0].delta?.content || "";
-                        if (content) {
-                          process.stdout.write(content); // Workers 可能不支持，仅用于日志
-                        }
-                      }
-                    } catch (e) {
-                      // 忽略解析错误
-                    }
-                  }
-                }
-              }
-            }
-          } catch (e) {
-            console.log(`⏳ [${profile.toUpperCase()}-TIMEOUT] 流式读取中断: ${e.message}`);
-          }
-
-          console.log("\n"); // 结束泵送换行
-          return;
-        } catch (e) {
-          console.log(`⏳ [${profile.toUpperCase()}-TIMEOUT] 连通超时或断开 (${e.message})，该节点挂掉，无缝切往下一模型...`);
-          continue;
-        }
-      }
-
-      // 所有模型都失败
-      await writer.write(encoder.encode(`data: ${JSON.stringify({ error: `[${profile.toUpperCase()}] 所有优选备用节点均失效，请稍后重试。` })}\n\n`));
-      await writer.write(encoder.encode("data: [DONE]\n\n"));
-    } catch (e) {
-      console.log(`[ERROR] 流式处理异常: ${e.message}`);
-    } finally {
-      try {
-        await writer.close();
-      } catch (e) {
-        // 忽略关闭错误
-      }
-    }
-  })());
-
-  return new Response(readable, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
-      "Access-Control-Allow-Origin": "*"
-    }
-  });
-}
-
-// ==================== 非流式响应处理 ====================
-async function handleNonStreamResponse(payload, fallbackModels, headers, profile, env, ctx) {
+// ==================== 响应处理 (零拷贝转发) ====================
+async function handleProxyRequest(payload, fallbackModels, headers, profile) {
   for (const currentModel of fallbackModels) {
-    const modelPayload = { ...payload, model: currentModel };
     try {
       const res = await fetch(`${NVIDIA_API_URL}/chat/completions`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(modelPayload),
-        signal: AbortSignal.timeout(60000)
+        method: "POST", headers, body: JSON.stringify({ ...payload, model: currentModel }), signal: AbortSignal.timeout(60000)
       });
 
+      // 如果遭遇限流或服务器熔断，快速重试下一个备用模型
       if (res.status === 429 || res.status >= 500) {
-        console.log(`⚠️ [${profile.toUpperCase()}-WARN] ${currentModel} 非流异常 (${res.status})，尝试降级...`);
+        console.log(`⚠️ [WARN] ${currentModel} 返回 ${res.status}，降级重试...`);
         continue;
       }
 
-      if (!res.ok) {
-        const errText = await res.text();
-        if (res.status === 400 && (errText.includes("unsupported") || errText.includes("Extra inputs") || errText.includes("tool"))) {
-          console.log(`⚠️ [${profile.toUpperCase()}-WARN] ${currentModel} 非流参数不兼容(400)，尝试降级节点...`);
-          continue;
-        }
-
-        let errorBody;
-        try {
-          errorBody = JSON.parse(errText);
-        } catch (e) {
-          errorBody = { detail: errText };
-        }
-        return new Response(JSON.stringify(errorBody), {
-          status: res.status,
-          headers: { "Content-Type": "application/json" }
-        });
-      }
-
-      const data = await res.json();
-      return new Response(JSON.stringify(data), {
-        headers: { "Content-Type": "application/json" }
+      // 只要不是 429/500，哪怕是 400 传参错误，我们也直接透传给客户端，不再暴力干预
+      console.log(`🚀 [OK] 接通 ${currentModel}，开始零拷贝透传管道...`);
+      
+      // 优化 1：零拷贝转发 (Zero-Copy Pipe)
+      // 我们直接提取 NVIDIA 的 res.body 并返回，Workers 底层会用流的方式原样发送给客户端
+      // 无需再做 TextDecoder 拆包和 TextEncoder 封包，极大节省资源。
+      const proxyHeaders = new Headers(res.headers);
+      proxyHeaders.set("Access-Control-Allow-Origin", "*"); // 注入 CORS
+      
+      return new Response(res.body, {
+        status: res.status,
+        headers: proxyHeaders
       });
+
     } catch (e) {
-      console.log(`⏳ [${profile.toUpperCase()}-TIMEOUT] 非流计算超时 (${e.message})，切换切往下一模型...`);
+      console.log(`⏳ [TIMEOUT] ${currentModel} 连接异常，降级重试...`);
       continue;
     }
   }
 
-  return new Response(JSON.stringify({ detail: `[${profile.toUpperCase()}] 分组所有节点均遭遇阻断或超时。` }), {
-    status: 504,
-    headers: { "Content-Type": "application/json" }
-  });
+  // 所有节点全部阵亡的最终兜底返回
+  return new Response(JSON.stringify({
+    error: { message: `[${profile}] 抱歉，该分组下所有优选模型节点均由于网络或服务异常断开，请稍后再试。` }
+  }), { status: 504, headers: { "Content-Type": "application/json" } });
 }
