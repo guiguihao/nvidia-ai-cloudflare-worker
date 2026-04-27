@@ -7,11 +7,13 @@
 const NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1";
 
 const TARGET_KEYWORDS = [
-  "gpt-oss-120b", "minimaxai", "gemma-4-", "qwen", "glm-5",
+  "deepseek-v4", "gpt-oss-120b", "minimaxai", "gemma-4-", "qwen", "glm-5",
   "deepseek-v3", "kimi-k2.", "llama-3.1-405b", "mistral-large-3"
 ];
 
 const PRIORITY_LIST = [
+  "deepseek-ai/deepseek-v4-pro",
+  "deepseek-ai/deepseek-v4-flash",
   "qwen/qwen3-coder-480b-a35b-instruct",
   "deepseek-ai/deepseek-v3.2",
   "google/gemma-4-31b-it",
@@ -53,7 +55,7 @@ class NvidiaManager {
           this.apiKey = key;
           return;
         }
-      } catch (e) {}
+      } catch (e) { }
     }
     throw new Error("[NVIDIA] 未配置 API Key！");
   }
@@ -63,7 +65,7 @@ class NvidiaManager {
     const now = Date.now();
     // 内存数据有效且距离上次查 KV 不到 60 秒，直接使用内存
     if (this.availableModels.length > 0 && (now - this.lastKVFetch) < 60000) return;
-    
+
     if (env.NVIDIA_KV) {
       try {
         const stateStr = await env.NVIDIA_KV.get("nvidia_proxy_state");
@@ -75,7 +77,7 @@ class NvidiaManager {
           this.lastCheck = state.lastCheck || 0;
           this.lastKVFetch = now; // 更新拉取时间
         }
-      } catch (e) {}
+      } catch (e) { }
     }
   }
 
@@ -89,7 +91,7 @@ class NvidiaManager {
           lastCheck: this.lastCheck
         };
         await env.NVIDIA_KV.put("nvidia_proxy_state", JSON.stringify(state));
-      } catch (e) {}
+      } catch (e) { }
     }
   }
 
@@ -122,7 +124,7 @@ class NvidiaManager {
       }
     } catch (e) {
       console.log(`❌ [TEST] ${model}: 超时/异常`);
-      if (res && res.body) try { await res.body.cancel(); } catch(e) {}
+      if (res && res.body) try { await res.body.cancel(); } catch (e) { }
       return { model, latency: -1 };
     }
   }
@@ -154,7 +156,7 @@ class NvidiaManager {
 
       const fetchedModels = (await res.json()).data.map(m => m.id);
       const targetModels = fetchedModels.filter(m => this.isTargetModel(m));
-      
+
       // 优化 3：取消并发，完全串行探测，防止 429 限流
       const validResults = [];
       for (const m of targetModels) {
@@ -192,7 +194,7 @@ class NvidiaManager {
 
       this.optimalGroups = newGroups;
       ["auto", "coder", "novel", "task"].forEach(g => { if (newGroups[g].length > 0) this.bestModels[g] = newGroups[g][0]; });
-      
+
       this.lastCheck = Date.now();
       await this.saveStateToKV(env);
     } catch (e) {
@@ -246,7 +248,7 @@ export default {
         return { model, ...scoreInfo };
       });
       modelDetails.sort((a, b) => a.compositeScore - b.compositeScore);
-      
+
       return new Response(JSON.stringify({
         note: "探测由 Cron 定时任务执行，状态通过 KV 跨节点同步。若需手动触发全量测速并查看日志，请访问 /v1/update",
         availableModels: manager.availableModels,
@@ -304,13 +306,13 @@ async function handleProxyRequest(payload, fallbackModels, headers, profile) {
 
       // 只要不是 429/500，哪怕是 400 传参错误，我们也直接透传给客户端，不再暴力干预
       console.log(`🚀 [OK] 接通 ${currentModel}，开始零拷贝透传管道...`);
-      
+
       // 优化 1：零拷贝转发 (Zero-Copy Pipe)
       // 我们直接提取 NVIDIA 的 res.body 并返回，Workers 底层会用流的方式原样发送给客户端
       // 无需再做 TextDecoder 拆包和 TextEncoder 封包，极大节省资源。
       const proxyHeaders = new Headers(res.headers);
       proxyHeaders.set("Access-Control-Allow-Origin", "*"); // 注入 CORS
-      
+
       return new Response(res.body, {
         status: res.status,
         headers: proxyHeaders
