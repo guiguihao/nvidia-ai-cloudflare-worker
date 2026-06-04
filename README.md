@@ -121,7 +121,7 @@ crons = ["*/5 * * * *"]
 curl https://your-worker.your-subdomain.workers.dev/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-oss-120b",
+    "model": "openai/gpt-oss-120b",
     "messages": [{"role": "user", "content": "Hello"}],
     "stream": true
   }'
@@ -133,7 +133,7 @@ curl https://your-worker.your-subdomain.workers.dev/v1/chat/completions \
 curl https://your-worker.your-subdomain.workers.dev/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "deepseek-v3.2",
+    "model": "openai/gpt-oss-120b",
     "messages": [{"role": "user", "content": "Hello"}]
   }'
 ```
