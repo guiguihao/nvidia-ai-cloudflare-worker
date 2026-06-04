@@ -157,8 +157,8 @@ curl https://your-worker.your-subdomain.workers.dev/v1/chat/completions \
 
 - **auto**: 全局最优模型优先
 - **coder**: 编程相关模型 (deepseek, coder, qwen, gpt-oss)
-- **novel**: 小说创作相关模型 (minimax, novel, qwen, llama)
-- **task**: 任务处理相关模型 (gpt-oss, deepseek, task, qwen, 405b, 70b)
+- **novel**: 小说创作相关模型 (minimax, novel, qwen)
+- **task**: 任务处理相关模型 (gpt-oss, deepseek, qwen)
 
 
 ## 高级配置
