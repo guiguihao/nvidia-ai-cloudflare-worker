@@ -146,6 +146,7 @@ curl https://your-worker.your-subdomain.workers.dev/v1/chat/completions \
 curl https://your-worker.your-subdomain.workers.dev/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
+    "model": "auto",
     "messages": [{"role": "user", "content": "Hello"}]
   }'
 ```
